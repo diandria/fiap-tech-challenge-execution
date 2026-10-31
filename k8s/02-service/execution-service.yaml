@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Service
+metadata:
+  # infra-k8s finds this NLB by the tag service.k8s.aws/stack =
+  # car-repair-shop-execution/execution-api. Renaming the Service or the namespace
+  # disconnects the API Gateway from it.
+  name: execution-api
+  namespace: car-repair-shop-execution
+  labels:
+    app: execution-api
+    app.kubernetes.io/name: execution-api
+    app.kubernetes.io/part-of: fiap-tech-challenge
+    app.kubernetes.io/component: api
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "external"
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+    # Internal, never public: the API Gateway is the single entry point.
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "HTTP"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/health"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "3000"
+spec:
+  type: LoadBalancer
+  # Set by the AWS Load Balancer Controller when it takes the balancer over.
+  # Declaring it keeps a re-apply from recreating the Service, and the NLB.
+  loadBalancerClass: service.k8s.aws/nlb
+  selector:
+    app: execution-api
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP

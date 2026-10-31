@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: execution-config
+  namespace: car-repair-shop-execution
+  labels:
+    app.kubernetes.io/part-of: fiap-tech-challenge
+data:
+  PORT: "3000"
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  OTEL_SERVICE_NAME: "execution-service"
+  AWS_REGION: "us-east-1"
+  CORS_ORIGIN: ""
+  # One hop: the API Gateway, so req.ip is the caller and not a gateway ENI.
+  TRUST_PROXY_HOPS: "1"
+  # The tables the execution repository's Terraform creates. Fixed names,
+  # unlike the queue urls, which the CD writes to execution-runtime.
+  EXECUTIONS_TABLE: "car-repair-shop-executions"
+  EXECUTION_OUTBOX_TABLE: "car-repair-shop-execution-outbox"
+  PROCESSED_MESSAGES_TABLE: "car-repair-shop-execution-processed-messages"
