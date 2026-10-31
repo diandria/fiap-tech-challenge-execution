@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: execution-api
+  namespace: car-repair-shop-execution
+  labels:
+    app.kubernetes.io/part-of: fiap-tech-challenge
+spec:
+  # With minReplicas 2, this drains one node at a time without full downtime.
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: execution-api

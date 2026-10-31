@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: execution-api
+  namespace: car-repair-shop-execution
+  labels:
+    app: execution-api
+    app.kubernetes.io/name: execution-api
+    app.kubernetes.io/part-of: fiap-tech-challenge
+    app.kubernetes.io/component: api
+spec:
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 180
+  selector:
+    matchLabels:
+      app: execution-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  template:
+    metadata:
+      labels:
+        # Exact selector of the Service. Diverging leaves the NLB with no
+        # target and the gateway answering 503.
+        app: execution-api
+        app.kubernetes.io/name: execution-api
+        app.kubernetes.io/part-of: fiap-tech-challenge
+        app.kubernetes.io/component: api
+    spec:
+      # Time for SIGTERM to finish the message being handled and the outbox
+      # cycle in progress before the pod is killed.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+      - name: api
+        # Replaced at deploy time with the SHA tag; `latest` is a kubeconform
+        # placeholder.
+        image: car-repair-shop-execution:latest
+        imagePullPolicy: IfNotPresent
+        # Endpoint removal propagates asynchronously; the delay keeps the pod
+        # serving until traffic stops.
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sleep", "5"]
+        ports:
+        - name: http
+          containerPort: 3000
+        envFrom:
+        # Static, versioned in this repository.
+        - configMapRef:
+            name: execution-config
+        # Written by the CD from Terraform outputs: the saga queue urls, which
+        # change with every environment.
+        - configMapRef:
+            name: execution-runtime
+        # Written by the CD: JWT_SECRET. DynamoDB needs no credential here; the
+        # pod reaches it with the node's role.
+        - secretRef:
+            name: execution-secret
+        # Required by the HPA: with no CPU request there is no denominator.
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          failureThreshold: 24
+          periodSeconds: 5
+          timeoutSeconds: 5
+        # Liveness does not query the database: restarting does not fix a
+        # database that is down.
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 10
+          failureThreshold: 3
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          periodSeconds: 5
+          failureThreshold: 3
+          timeoutSeconds: 5

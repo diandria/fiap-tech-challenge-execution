@@ -89,3 +89,19 @@ jobs:
           path: coverage/
           retention-days: 3
           if-no-files-found: error
+
+  manifests:
+    name: Validate Kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Runs without a cluster and catches the misspelled field that would
+      # otherwise surface only on the deploy's `kubectl apply`.
+      - name: Install kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin kubeconform
+
+      - name: Validate
+        run: kubeconform -strict -summary k8s/
