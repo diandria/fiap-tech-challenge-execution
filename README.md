@@ -7,8 +7,23 @@ As ordens entram na fila quando o OS Service pede o diagnóstico e, depois do pa
 mecânico inicia e conclui a etapa atual de cada ordem e registra o andamento de cada serviço. Cada passo
 volta para o OS Service pelas filas da saga. Os dados ficam no DynamoDB.
 
-> Este README cresce junto com o serviço. A documentação de arquitetura do sistema inteiro, com as
-> decisões e os diagramas, fica no repositório do OS Service, em `docs/architecture/`.
+A arquitetura do serviço, com o diagrama, as mensagens e o modelo no DynamoDB descrito por padrão de
+acesso, está em [docs/architecture.md](docs/architecture.md). A arquitetura do sistema inteiro, com os ADRs
+da saga, fica no repositório do OS Service, em `docs/architecture/`.
+
+## Papel na saga
+
+A saga é orquestrada pelo OS Service. O Execution é o participante das etapas de diagnóstico e reparo:
+
+1. Recebe `EnqueueDiagnosis` quando a ordem é aberta e coloca a ordem na fila do mecânico.
+2. Quando o mecânico inicia e conclui o diagnóstico, responde `DiagnosisStarted` e `DiagnosisCompleted`.
+3. Depois do pagamento, recebe `EnqueueRepair` com os serviços pagos, e a ordem volta para o fim da fila.
+4. O início e a conclusão do reparo viram `RepairStarted` e `RepairCompleted`.
+5. Numa compensação, recebe `CancelExecution` e responde `ExecutionCancelled`.
+
+Comandos chegam pela fila `execution-commands` e respostas saem pela `saga-replies`, as duas FIFO, com a
+ordem como grupo de mensagens. As tabelas completas estão em
+[docs/architecture.md](docs/architecture.md#mensagens).
 
 ## Repositórios
 
@@ -127,3 +142,15 @@ npm run test:coverage   # com relatório de cobertura; o mínimo é 80%
 ```
 
 Os testes de integração seguem o padrão GIVEN / WHEN / THEN.
+
+### Cobertura
+
+O mínimo de 80% vale para linhas, branches, funções e statements, e o `npm run test:coverage` falha abaixo
+dele. O job `Coverage` do [CI](https://github.com/diandria/fiap-tech-challenge-execution/actions/workflows/ci.yml)
+roda em todo PR e guarda o relatório HTML como artefato do run.
+
+| Linhas | Statements | Funções | Branches |
+|---|---|---|---|
+| 96,75% | 95,72% | 96,64% | 91,66% |
+
+![Relatório de cobertura do Execution](docs/evidencias/cobertura-execution.png)
