@@ -15,6 +15,7 @@ function makeStore(messages: PendingMessage[]): IOutboxStore & { markPublished: 
   return {
     findPending: jest.fn().mockResolvedValue(messages),
     markPublished: jest.fn().mockResolvedValue(undefined),
+    countPending: jest.fn().mockResolvedValue(messages.length),
   };
 }
 
