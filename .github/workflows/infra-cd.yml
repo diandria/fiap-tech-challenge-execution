@@ -1,0 +1,81 @@
+name: Infra CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/infra-cd.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two concurrent applies on the same state fail on the S3 lock; this queue
+# serializes them instead.
+concurrency:
+  group: terraform-execution
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.15.6"
+  AWS_REGION: us-east-1
+  EXECUTIONS_TABLE: car-repair-shop-executions
+
+defaults:
+  run:
+    working-directory: terraform
+
+jobs:
+  apply:
+    name: Apply infrastructure
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      # A real operation, not sts get-caller-identity: when the Learner Lab
+      # revokes the session, sts keeps answering and only real calls are denied.
+      - name: Verify credentials
+        run: |
+          aws ec2 describe-vpcs --max-items 1 > /dev/null 2>&1 || {
+            echo "::error::AWS credentials missing, expired or revoked. Start the lab and update the AWS_* repository secrets."
+            exit 1
+          }
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      - name: terraform apply
+        run: terraform apply -auto-approve -input=false -no-color
+
+      # apply reports "created", not "working". The index is what the
+      # mechanic's queue reads; without it every listing fails.
+      - name: Verify the tables are active
+        run: |
+          read -r status index < <(aws dynamodb describe-table \
+            --table-name "$EXECUTIONS_TABLE" \
+            --query 'Table.[TableStatus,GlobalSecondaryIndexes[0].IndexName]' --output text)
+          echo "status=$status index=$index"
+          [ "$status" = "ACTIVE" ] || { echo "::error::$EXECUTIONS_TABLE is $status, expected ACTIVE"; exit 1; }
+          [ "$index" = "status-queuedAt" ] || { echo "::error::index status-queuedAt is missing"; exit 1; }
+
+      - name: Summary
+        run: |
+          {
+            echo "### Execution infrastructure applied"
+            echo ""
+            echo "| Table | Name |"
+            echo "|---|---|"
+            echo "| Executions | \`$(terraform output -raw executions_table)\` |"
+            echo "| Outbox | \`$(terraform output -raw execution_outbox_table)\` |"
+            echo "| Processed messages | \`$(terraform output -raw processed_messages_table)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

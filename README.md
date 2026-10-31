@@ -43,6 +43,35 @@ DynamoDB local as mesmas tabelas que o Terraform cria na AWS.
 | `GET /metrics` | Métricas no formato do Prometheus |
 | `GET /docs` | Swagger |
 
+## Infraestrutura
+
+As tabelas do Execution são provisionadas por este repositório, na pasta `terraform/`, com estado próprio
+(`execution/terraform.tfstate`, no mesmo bucket dos outros repositórios). Nenhum outro estado é lido: o
+DynamoDB não precisa de rede nem de security group, então um `apply` aqui não depende de nada. Filas,
+cluster e registro de imagens são plataforma compartilhada e ficam no `infra-k8s`.
+
+| Tabela | Chave | Detalhe |
+|---|---|---|
+| `car-repair-shop-executions` | `serviceOrderId` | Índice `status-queuedAt`, que serve a fila do mecânico |
+| `car-repair-shop-execution-outbox` | `messageId` | Respostas à saga esperando publicação |
+| `car-repair-shop-execution-processed-messages` | `messageId` | Comandos já tratados; expiram em 30 dias pelo atributo `expiresAt` |
+
+As três usam cobrança por requisição e a criptografia padrão do DynamoDB. A recuperação ponto a ponto fica
+desligada porque o ambiente é recriado a cada ciclo; em produção, ela seria ligada na tabela de execuções.
+`scripts/dynamodb/tables.ts` cria as mesmas tabelas no DynamoDB local, e os nomes e o índice precisam
+continuar iguais aos do Terraform.
+
+As pipelines de infraestrutura só rodam quando `terraform/` muda:
+
+| Workflow | Quando | O que faz |
+|---|---|---|
+| `Infra CI` | Pull request | `fmt`, `validate`, `tflint` e `trivy`; não precisa de credencial |
+| `Infra CD` | Merge na `main` | `apply` e confirmação de que a tabela de execuções está ativa e tem o índice da fila |
+| `Infra destroy` | Manual, digitando `production` | `destroy` do ambiente |
+
+O `Infra CD` e o `Infra destroy` usam os segredos `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e
+`AWS_SESSION_TOKEN` do repositório, que precisam ser atualizados a cada sessão do Learner Lab.
+
 ## Testes
 
 ```bash
