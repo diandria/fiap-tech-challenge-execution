@@ -113,5 +113,48 @@ export function executionRoutes(controller: ExecutionController): Router {
    */
   router.post('/:serviceOrderId/finish', ...mechanicOrAdmin, (req, res, next) => controller.finish(req, res, next));
 
+  /**
+   * @openapi
+   * /executions/{serviceOrderId}/tasks/{serviceId}:
+   *   patch:
+   *     summary: Start or finish one service of the repair (mechanic, admin)
+   *     description: |
+   *       Only while the repair is in progress. A service starts once and finishes once, after starting.
+   *       The times feed the average duration per service.
+   *     tags: [Executions]
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: serviceOrderId
+   *         required: true
+   *         schema: { type: string, format: uuid }
+   *       - in: path
+   *         name: serviceId
+   *         required: true
+   *         schema: { type: string, format: uuid }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [status]
+   *             properties:
+   *               status:
+   *                 type: string
+   *                 enum: [IN_PROGRESS, COMPLETED]
+   *     responses:
+   *       200:
+   *         description: The execution with the service updated
+   *       400:
+   *         description: Invalid status, repair not in progress, or service already started or finished
+   *       403:
+   *         description: Not a mechanic or admin token
+   *       404:
+   *         description: The order has no execution, or the service is not part of the repair
+   */
+  router.patch('/:serviceOrderId/tasks/:serviceId', ...mechanicOrAdmin, (req, res, next) => controller.updateTaskStatus(req, res, next));
+
   return router;
 }

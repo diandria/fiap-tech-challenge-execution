@@ -16,8 +16,9 @@ import { ListQueueUseCase } from '../../src/use-cases/executions/ListQueueUseCas
 import { GetExecutionUseCase } from '../../src/use-cases/executions/GetExecutionUseCase';
 import { StartStageUseCase } from '../../src/use-cases/executions/StartStageUseCase';
 import { FinishStageUseCase } from '../../src/use-cases/executions/FinishStageUseCase';
+import { UpdateTaskUseCase } from '../../src/use-cases/executions/UpdateTaskUseCase';
 import { PublishPendingMessagesUseCase } from '../../src/use-cases/messaging/PublishPendingMessagesUseCase';
-import { Execution, finish, queueDiagnosis, start } from '../../src/entities/Execution';
+import { Execution, finish, queueDiagnosis, queueRepair, start, startTask } from '../../src/entities/Execution';
 
 let dynamo: TestDynamo;
 let sqs: SQSClient;
@@ -40,6 +41,7 @@ beforeAll(async () => {
     new GetExecutionUseCase(executions),
     new StartStageUseCase(executions, store),
     new FinishStageUseCase(executions, store),
+    new UpdateTaskUseCase(executions, store),
   );
   app = createApp(tableReadiness(dynamo.client, dynamo.tables.executions), { executions: executionRoutes(controller) });
 
@@ -151,6 +153,43 @@ describe('Mechanic queue API', () => {
 
     // WHEN
     const res = await request(app).get(`/executions/${serviceOrderId}`).set('Authorization', `Bearer ${staffToken('mechanic')}`);
+
+    // THEN
+    expect(res.status).toBe(404);
+  });
+
+  it('GIVEN a repair in progress with a started service WHEN PATCH task COMPLETED THEN both timestamps are stored', async () => {
+    // GIVEN
+    const serviceOrderId = nextOrderId();
+    const serviceId = 'c0000000-0000-4000-8000-000000000001';
+    const diagnosed = finish(start(queueDiagnosis(serviceOrderId, new Date()), new Date()), new Date());
+    const repair = start(queueRepair(diagnosed, [{ serviceId, name: 'Oil change' }], new Date()), new Date());
+    await seed(startTask(repair, serviceId, new Date('2026-10-31T12:00:00.000Z')));
+
+    // WHEN
+    const res = await request(app)
+      .patch(`/executions/${serviceOrderId}/tasks/${serviceId}`)
+      .set('Authorization', `Bearer ${staffToken('mechanic')}`)
+      .send({ status: 'COMPLETED' });
+
+    // THEN
+    expect(res.status).toBe(200);
+    expect(res.body.tasks).toEqual([
+      { serviceId, name: 'Oil change', startedAt: '2026-10-31T12:00:00.000Z', finishedAt: expect.any(String) },
+    ]);
+  });
+
+  it('GIVEN a repair in progress WHEN PATCH a service that is not part of it THEN returns 404', async () => {
+    // GIVEN
+    const serviceOrderId = nextOrderId();
+    const diagnosed = finish(start(queueDiagnosis(serviceOrderId, new Date()), new Date()), new Date());
+    await seed(start(queueRepair(diagnosed, [{ serviceId: 'c0000000-0000-4000-8000-000000000001', name: 'Oil change' }], new Date()), new Date()));
+
+    // WHEN
+    const res = await request(app)
+      .patch(`/executions/${serviceOrderId}/tasks/c0000000-0000-4000-8000-000000000099`)
+      .set('Authorization', `Bearer ${staffToken('mechanic')}`)
+      .send({ status: 'IN_PROGRESS' });
 
     // THEN
     expect(res.status).toBe(404);

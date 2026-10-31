@@ -1,5 +1,5 @@
-import { cancel, finish, queueDiagnosis, queueRepair, start } from '../../../src/entities/Execution';
-import { ValidationError } from '../../../src/entities/errors/AppError';
+import { cancel, finish, finishTask, queueDiagnosis, queueRepair, start, startTask } from '../../../src/entities/Execution';
+import { NotFoundError, ValidationError } from '../../../src/entities/errors/AppError';
 import { finishedDiagnosis, queuedDiagnosis, repairInProgress } from '../fixtures/execution';
 
 const now = new Date('2026-10-31T13:00:00.000Z');
@@ -79,5 +79,41 @@ describe('cancel', () => {
     const cancelled = { ...queuedDiagnosis, status: 'CANCELLED' as const };
 
     expect(cancel(cancelled)).toBe(cancelled);
+  });
+});
+
+describe('startTask', () => {
+  it('records startedAt on a task of a repair in progress', () => {
+    const updated = startTask(repairInProgress, 's-2', now);
+
+    expect(updated.tasks[1]).toEqual({ serviceId: 's-2', name: 'Brake check', startedAt: now });
+    expect(updated.tasks[0]).toEqual(repairInProgress.tasks[0]);
+  });
+
+  it('throws when the execution is not a repair in progress, or the task already started', () => {
+    expect(() => startTask({ ...repairInProgress, status: 'QUEUED' }, 's-2', now)).toThrow(ValidationError);
+    expect(() => startTask({ ...finishedDiagnosis, stage: 'DIAGNOSIS', status: 'IN_PROGRESS' }, 's-2', now)).toThrow(ValidationError);
+    expect(() => startTask(repairInProgress, 's-1', now)).toThrow('already started');
+  });
+
+  it('throws NotFoundError for a service that is not part of the repair', () => {
+    expect(() => startTask(repairInProgress, 's-9', now)).toThrow(NotFoundError);
+  });
+});
+
+describe('finishTask', () => {
+  it('records finishedAt on a started task', () => {
+    const started = startTask(repairInProgress, 's-2', new Date('2026-10-31T12:45:00.000Z'));
+
+    expect(finishTask(started, 's-2', now).tasks[1]).toMatchObject({ startedAt: new Date('2026-10-31T12:45:00.000Z'), finishedAt: now });
+  });
+
+  it('throws for a task not started yet or already finished', () => {
+    expect(() => finishTask(repairInProgress, 's-2', now)).toThrow('not been started');
+    expect(() => finishTask(repairInProgress, 's-1', now)).toThrow('already finished');
+  });
+
+  it('throws when the repair is not in progress', () => {
+    expect(() => finishTask({ ...repairInProgress, status: 'DONE' }, 's-1', now)).toThrow(ValidationError);
   });
 });
