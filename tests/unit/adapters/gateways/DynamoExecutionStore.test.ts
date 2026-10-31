@@ -106,4 +106,20 @@ describe('DynamoExecutionStore', () => {
     await expect(makeStore(send).save({ execution: { state: queuedDiagnosis, expectedVersion: 0 }, messages: [reply] }))
       .rejects.toBeInstanceOf(TransactionCanceledException);
   });
+
+  it('writes only the replies and the processed marker when the change has no execution', async () => {
+    const send = jest.fn().mockResolvedValue({});
+
+    await makeStore(send).save({ messages: [reply], processedMessage: { messageId: 'm-1', type: 'CancelExecution' } });
+
+    const items = send.mock.calls[0][0].input.TransactItems;
+    expect(items.map((item: { Put: { TableName: string } }) => item.Put.TableName)).toEqual(['outbox', 'processed']);
+  });
+
+  it('maps a processed-message failure to DuplicateMessageError when the change has no execution', async () => {
+    const send = jest.fn().mockRejectedValue(cancelled(['None', 'ConditionalCheckFailed']));
+
+    await expect(makeStore(send).save({ messages: [reply], processedMessage: { messageId: 'm-1', type: 'CancelExecution' } }))
+      .rejects.toThrow(DuplicateMessageError);
+  });
 });

@@ -18,6 +18,7 @@ import { ExecutionCommandHandler } from './adapters/messaging/ExecutionCommandHa
 import { PublishPendingMessagesUseCase } from './use-cases/messaging/PublishPendingMessagesUseCase';
 import { EnqueueDiagnosisUseCase } from './use-cases/executions/EnqueueDiagnosisUseCase';
 import { EnqueueRepairUseCase } from './use-cases/executions/EnqueueRepairUseCase';
+import { CancelExecutionUseCase } from './use-cases/executions/CancelExecutionUseCase';
 import { IExecutionRepository } from './use-cases/ports/IExecutionRepository';
 import { IExecutionStore } from './use-cases/ports/IExecutionStore';
 import { DynamoExecutionRepository } from './adapters/gateways/DynamoExecutionRepository';
@@ -48,9 +49,11 @@ function startMessaging(queues: QueueConfig, tables: TableNames, { executions, s
   );
   const enqueueDiagnosis = new EnqueueDiagnosisUseCase(executions, store);
   const enqueueRepair = new EnqueueRepairUseCase(executions, store);
+  const cancelExecution = new CancelExecutionUseCase(executions, store);
   const commands = new ExecutionCommandHandler({
     EnqueueDiagnosis: (command) => enqueueDiagnosis.execute(command),
     EnqueueRepair: (command) => enqueueRepair.execute(command),
+    CancelExecution: (command) => cancelExecution.execute(command),
   });
   const poller = new SqsQueuePoller(sqs, { name: 'execution-commands', url: queues.executionCommands }, commands, logger);
 

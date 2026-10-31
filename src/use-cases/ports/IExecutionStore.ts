@@ -3,7 +3,8 @@ import { OutgoingMessage } from '../messaging/MessageEnvelope';
 
 /** Everything one change writes, saved together or not at all. */
 export interface ExecutionChanges {
-  execution: {
+  /** Absent when the change only replies, without touching any execution. */
+  execution?: {
     state: Execution;
     /** The version the state was computed from; null when the execution must not exist yet. */
     expectedVersion: number | null;

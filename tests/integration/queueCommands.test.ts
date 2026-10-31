@@ -10,6 +10,7 @@ import { SqsMessageSender } from '../../src/adapters/messaging/SqsMessageSender'
 import { SqsQueuePoller } from '../../src/frameworks/messaging/SqsQueuePoller';
 import { EnqueueDiagnosisUseCase } from '../../src/use-cases/executions/EnqueueDiagnosisUseCase';
 import { EnqueueRepairUseCase } from '../../src/use-cases/executions/EnqueueRepairUseCase';
+import { CancelExecutionUseCase } from '../../src/use-cases/executions/CancelExecutionUseCase';
 import { PublishPendingMessagesUseCase } from '../../src/use-cases/messaging/PublishPendingMessagesUseCase';
 import { MessageEnvelope } from '../../src/use-cases/messaging/MessageEnvelope';
 import { finish, start } from '../../src/entities/Execution';
@@ -33,9 +34,11 @@ beforeAll(async () => {
 
   const enqueueDiagnosis = new EnqueueDiagnosisUseCase(executions, store);
   const enqueueRepair = new EnqueueRepairUseCase(executions, store);
+  const cancelExecution = new CancelExecutionUseCase(executions, store);
   const handler = new ExecutionCommandHandler({
     EnqueueDiagnosis: (command) => enqueueDiagnosis.execute(command),
     EnqueueRepair: (command) => enqueueRepair.execute(command),
+    CancelExecution: (command) => cancelExecution.execute(command),
   });
   poller = new SqsQueuePoller(sqs, { name: 'execution-commands', url: queues['execution-commands'].url }, handler, silentLog, { waitTimeSeconds: 1 });
 
@@ -57,6 +60,17 @@ async function deliver(message: Omit<MessageEnvelope, 'occurredAt'>): Promise<vo
   }));
 }
 
+/** Takes an order through diagnosis the way the mechanic will: queued, started, finished. */
+async function finishedDiagnosisFor(serviceOrderId: string, messageId: string): Promise<void> {
+  await new EnqueueDiagnosisUseCase(executions, store).execute({
+    messageId, type: 'EnqueueDiagnosis', serviceOrderId, occurredAt: '', payload: {},
+  });
+  const queued = (await executions.findById(serviceOrderId))!;
+  await store.save({ execution: { state: start(queued, new Date()), expectedVersion: queued.version }, messages: [] });
+  const started = (await executions.findById(serviceOrderId))!;
+  await store.save({ execution: { state: finish(started, new Date()), expectedVersion: started.version }, messages: [] });
+}
+
 describe('Queue commands', () => {
   it('GIVEN EnqueueDiagnosis on the commands queue WHEN the consumer runs THEN the order is in the queue for diagnosis', async () => {
     // GIVEN
@@ -75,13 +89,7 @@ describe('Queue commands', () => {
   it('GIVEN a finished diagnosis WHEN EnqueueRepair is consumed THEN the order is back in the queue for repair with its tasks and nothing is replied', async () => {
     // GIVEN
     const serviceOrderId = 'a0000000-0000-4000-8000-000000000002';
-    await new EnqueueDiagnosisUseCase(executions, store).execute({
-      messageId: 'b0000000-0000-4000-8000-000000000002', type: 'EnqueueDiagnosis', serviceOrderId, occurredAt: '', payload: {},
-    });
-    const queued = (await executions.findById(serviceOrderId))!;
-    await store.save({ execution: { state: start(queued, new Date()), expectedVersion: queued.version }, messages: [] });
-    const started = (await executions.findById(serviceOrderId))!;
-    await store.save({ execution: { state: finish(started, new Date()), expectedVersion: started.version }, messages: [] });
+    await finishedDiagnosisFor(serviceOrderId, 'b0000000-0000-4000-8000-000000000002');
     await deliver({
       messageId: 'b0000000-0000-4000-8000-000000000003',
       type: 'EnqueueRepair',
@@ -101,5 +109,28 @@ describe('Queue commands', () => {
     });
     expect(await publish.execute(25)).toBe(0);
     expect(await receiveAll(sqs, queues['saga-replies'].url)).toHaveLength(0);
+  });
+
+  it('GIVEN a finished diagnosis WHEN CancelExecution is consumed THEN the execution is CANCELLED and ExecutionCancelled is published', async () => {
+    // GIVEN
+    const serviceOrderId = 'a0000000-0000-4000-8000-000000000003';
+    await finishedDiagnosisFor(serviceOrderId, 'b0000000-0000-4000-8000-000000000004');
+    await deliver({
+      messageId: 'b0000000-0000-4000-8000-000000000005',
+      type: 'CancelExecution',
+      serviceOrderId,
+      payload: { reason: 'BUDGET_REJECTED' },
+    });
+
+    // WHEN
+    await poller.pollOnce();
+    await publish.execute(25);
+
+    // THEN
+    expect(await executions.findById(serviceOrderId)).toMatchObject({ stage: 'DIAGNOSIS', status: 'CANCELLED' });
+    const replies = await receiveAll(sqs, queues['saga-replies'].url);
+    expect(replies.map((m) => JSON.parse(m.Body ?? '{}'))).toEqual([
+      expect.objectContaining({ type: 'ExecutionCancelled', serviceOrderId, payload: {} }),
+    ]);
   });
 });
