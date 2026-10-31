@@ -33,15 +33,14 @@ describe('Execution store', () => {
     // GIVEN
     const serviceOrderId = 'a0000000-0000-4000-8000-000000000001';
     const queued = queueDiagnosis(serviceOrderId, new Date('2026-10-31T10:00:00.000Z'));
-    await store.save({ execution: queued, expectedVersion: null, messages: [] });
+    await store.save({ execution: { state: queued, expectedVersion: null }, messages: [] });
     const stored = await repository.findById(serviceOrderId);
-    await store.save({ execution: start(stored!, new Date()), expectedVersion: stored!.version, messages: [] });
+    await store.save({ execution: { state: start(stored!, new Date()), expectedVersion: stored!.version }, messages: [] });
     const outboxBefore = await outboxCount();
 
     // WHEN
     const stale = store.save({
-      execution: start(stored!, new Date()),
-      expectedVersion: stored!.version,
+      execution: { state: start(stored!, new Date()), expectedVersion: stored!.version },
       messages: [reply(serviceOrderId, 'DiagnosisStarted')],
       processedMessage: { messageId: 'b0000000-0000-4000-8000-000000000001', type: 'StartDiagnosis' },
     });
@@ -57,13 +56,12 @@ describe('Execution store', () => {
     const serviceOrderId = 'a0000000-0000-4000-8000-000000000002';
     const command = { messageId: 'b0000000-0000-4000-8000-000000000002', type: 'EnqueueDiagnosis' };
     const queued = queueDiagnosis(serviceOrderId, new Date('2026-10-31T10:00:00.000Z'));
-    await store.save({ execution: queued, expectedVersion: null, messages: [reply(serviceOrderId, 'DiagnosisQueued')], processedMessage: command });
+    await store.save({ execution: { state: queued, expectedVersion: null }, messages: [reply(serviceOrderId, 'DiagnosisQueued')], processedMessage: command });
     const outboxBefore = await outboxCount();
 
     // WHEN
     const repeat = store.save({
-      execution: queued,
-      expectedVersion: 0,
+      execution: { state: queued, expectedVersion: 0 },
       messages: [reply(serviceOrderId, 'DiagnosisQueued')],
       processedMessage: command,
     });
@@ -81,8 +79,7 @@ describe('Execution store', () => {
 
     // WHEN
     await store.save({
-      execution: queueDiagnosis(serviceOrderId, new Date()),
-      expectedVersion: null,
+      execution: { state: queueDiagnosis(serviceOrderId, new Date()), expectedVersion: null },
       messages: [reply(serviceOrderId, 'DiagnosisQueued')],
     });
 

@@ -36,8 +36,7 @@ describe('DynamoExecutionStore', () => {
     const send = jest.fn().mockResolvedValue({});
 
     await makeStore(send, '00-abc-def-01').save({
-      execution: queuedDiagnosis,
-      expectedVersion: 0,
+      execution: { state: queuedDiagnosis, expectedVersion: 0 },
       messages: [reply],
       processedMessage: { messageId: 'm-1', type: 'StartDiagnosis' },
     });
@@ -73,7 +72,7 @@ describe('DynamoExecutionStore', () => {
   it('requires the execution not to exist when there is no expected version', async () => {
     const send = jest.fn().mockResolvedValue({});
 
-    await makeStore(send).save({ execution: queuedDiagnosis, expectedVersion: null, messages: [] });
+    await makeStore(send).save({ execution: { state: queuedDiagnosis, expectedVersion: null }, messages: [] });
 
     const [execution] = send.mock.calls[0][0].input.TransactItems;
     expect(execution.Put.ConditionExpression).toBe('attribute_not_exists(serviceOrderId)');
@@ -85,8 +84,7 @@ describe('DynamoExecutionStore', () => {
     const send = jest.fn().mockRejectedValue(cancelled(['ConditionalCheckFailed', 'None', 'None']));
 
     await expect(makeStore(send).save({
-      execution: queuedDiagnosis,
-      expectedVersion: 3,
+      execution: { state: queuedDiagnosis, expectedVersion: 3 },
       messages: [reply],
       processedMessage: { messageId: 'm-1', type: 'StartDiagnosis' },
     })).rejects.toThrow(ConflictError);
@@ -96,8 +94,7 @@ describe('DynamoExecutionStore', () => {
     const send = jest.fn().mockRejectedValue(cancelled(['None', 'None', 'ConditionalCheckFailed']));
 
     await expect(makeStore(send).save({
-      execution: queuedDiagnosis,
-      expectedVersion: 0,
+      execution: { state: queuedDiagnosis, expectedVersion: 0 },
       messages: [reply],
       processedMessage: { messageId: 'm-1', type: 'StartDiagnosis' },
     })).rejects.toThrow(DuplicateMessageError);
@@ -106,7 +103,7 @@ describe('DynamoExecutionStore', () => {
   it('rethrows any other failure as it is', async () => {
     const send = jest.fn().mockRejectedValue(cancelled(['ThrottlingError', 'None']));
 
-    await expect(makeStore(send).save({ execution: queuedDiagnosis, expectedVersion: 0, messages: [reply] }))
+    await expect(makeStore(send).save({ execution: { state: queuedDiagnosis, expectedVersion: 0 }, messages: [reply] }))
       .rejects.toBeInstanceOf(TransactionCanceledException);
   });
 });

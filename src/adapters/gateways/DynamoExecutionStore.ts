@@ -36,7 +36,7 @@ export class DynamoExecutionStore implements IExecutionStore {
   async save(changes: ExecutionChanges): Promise<void> {
     const now = this.now();
     const items: TransactItem[] = [
-      this.executionPut(changes),
+      this.executionPut(changes.execution),
       ...changes.messages.map((message) => this.outboxPut(message, now)),
     ];
     // The marker goes last, so its cancellation reason is the last one.
@@ -49,12 +49,12 @@ export class DynamoExecutionStore implements IExecutionStore {
     }
   }
 
-  private executionPut({ execution, expectedVersion }: ExecutionChanges): TransactItem {
+  private executionPut({ state, expectedVersion }: ExecutionChanges['execution']): TransactItem {
     const isNew = expectedVersion === null;
     return {
       Put: {
         TableName: this.tables.executions,
-        Item: toItem({ ...execution, version: isNew ? 0 : expectedVersion + 1 }),
+        Item: toItem({ ...state, version: isNew ? 0 : expectedVersion + 1 }),
         ConditionExpression: isNew ? 'attribute_not_exists(serviceOrderId)' : 'version = :expected',
         ...(!isNew && { ExpressionAttributeValues: { ':expected': expectedVersion } }),
       },
