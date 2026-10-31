@@ -45,6 +45,23 @@ export class DynamoOutboxStore implements IOutboxStore {
       }));
   }
 
+  /** Follows every page: a scan page stops at 1 MB, and a long backlog is exactly when the count matters. */
+  async countPending(): Promise<number> {
+    let total = 0;
+    let startKey: Record<string, unknown> | undefined;
+    do {
+      const page = await this.documents.send(new ScanCommand({
+        TableName: this.tableName,
+        Select: 'COUNT',
+        ConsistentRead: true,
+        ExclusiveStartKey: startKey,
+      }));
+      total += page.Count ?? 0;
+      startKey = page.LastEvaluatedKey;
+    } while (startKey);
+    return total;
+  }
+
   async markPublished(messageId: string): Promise<void> {
     await this.documents.send(new DeleteCommand({ TableName: this.tableName, Key: { messageId } }));
   }

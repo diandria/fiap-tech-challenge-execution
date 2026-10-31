@@ -18,6 +18,7 @@ import { readTableNames, TableNames } from './frameworks/database/tableNames';
 import { logger } from './frameworks/logging/logger';
 import { readQueueConfig, QueueConfig } from './frameworks/messaging/queueConfig';
 import { OutboxRelay } from './frameworks/messaging/OutboxRelay';
+import { registerOutboxBacklog } from './frameworks/metrics/outboxBacklog';
 import { SqsQueuePoller } from './frameworks/messaging/SqsQueuePoller';
 import { PrometheusIntegrationFailures } from './frameworks/metrics/PrometheusIntegrationFailures';
 import { DynamoOutboxStore } from './adapters/gateways/DynamoOutboxStore';
@@ -50,11 +51,13 @@ interface Persistence {
 function startMessaging(queues: QueueConfig, tables: TableNames, { executions, store }: Persistence): Messaging {
   const sqs = new SQSClient({});
   const sender = new SqsMessageSender(sqs, queues.destinations, new PrometheusIntegrationFailures());
+  const outbox = new DynamoOutboxStore(documentClient, tables.outbox);
   const relay = new OutboxRelay(
-    new PublishPendingMessagesUseCase(new DynamoOutboxStore(documentClient, tables.outbox), sender),
+    new PublishPendingMessagesUseCase(outbox, sender),
     logger,
     { batchSize: OUTBOX_BATCH_SIZE, idleDelayMs: 1000 },
   );
+  registerOutboxBacklog(() => outbox.countPending(), logger);
   const enqueueDiagnosis = new EnqueueDiagnosisUseCase(executions, store);
   const enqueueRepair = new EnqueueRepairUseCase(executions, store);
   const cancelExecution = new CancelExecutionUseCase(executions, store);
