@@ -11,6 +11,7 @@ import { GetExecutionUseCase } from './use-cases/executions/GetExecutionUseCase'
 import { StartStageUseCase } from './use-cases/executions/StartStageUseCase';
 import { FinishStageUseCase } from './use-cases/executions/FinishStageUseCase';
 import { UpdateTaskUseCase } from './use-cases/executions/UpdateTaskUseCase';
+import { GetAverageTaskDurationUseCase } from './use-cases/executions/GetAverageTaskDurationUseCase';
 import { documentClient, dynamoClient } from './frameworks/database/dynamoClient';
 import { tableReadiness } from './frameworks/database/readinessProbe';
 import { readTableNames, TableNames } from './frameworks/database/tableNames';
@@ -90,6 +91,7 @@ function main(): void {
     new StartStageUseCase(executions, store),
     new FinishStageUseCase(executions, store),
     new UpdateTaskUseCase(executions, store),
+    new GetAverageTaskDurationUseCase(executions),
   );
   const app = createApp(tableReadiness(dynamoClient, tables.executions), { executions: executionRoutes(controller) });
   const messaging = queues ? startMessaging(queues, tables, persistence) : undefined;

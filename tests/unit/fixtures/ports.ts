@@ -6,6 +6,7 @@ export function makeRepository(execution: Execution | null = null): jest.Mocked<
   return {
     findById: jest.fn().mockResolvedValue(execution),
     listByStatus: jest.fn().mockResolvedValue([]),
+    listFinishedRepairs: jest.fn().mockResolvedValue([]),
   };
 }
 

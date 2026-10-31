@@ -4,6 +4,7 @@ import { GetExecutionUseCase } from '../../use-cases/executions/GetExecutionUseC
 import { StartStageUseCase } from '../../use-cases/executions/StartStageUseCase';
 import { FinishStageUseCase } from '../../use-cases/executions/FinishStageUseCase';
 import { UpdateTaskUseCase } from '../../use-cases/executions/UpdateTaskUseCase';
+import { GetAverageTaskDurationUseCase } from '../../use-cases/executions/GetAverageTaskDurationUseCase';
 import { ExecutionPresenter } from '../presenters/ExecutionPresenter';
 
 export class ExecutionController {
@@ -13,6 +14,7 @@ export class ExecutionController {
     private readonly startStage: StartStageUseCase,
     private readonly finishStage: FinishStageUseCase,
     private readonly updateTask: UpdateTaskUseCase,
+    private readonly averageTaskDuration: GetAverageTaskDurationUseCase,
   ) {}
 
   async list(_req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -52,6 +54,12 @@ export class ExecutionController {
       });
       const { status, body } = ExecutionPresenter.ok(execution);
       res.status(status).json(body);
+    } catch (err) { next(err); }
+  }
+
+  async averageDuration(_req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      res.status(200).json(await this.averageTaskDuration.execute());
     } catch (err) { next(err); }
   }
 }

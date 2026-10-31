@@ -32,6 +32,26 @@ export function executionRoutes(controller: ExecutionController): Router {
 
   /**
    * @openapi
+   * /executions/stats/average-task-duration:
+   *   get:
+   *     summary: Average duration of each service over the finished repairs (attendant, admin)
+   *     tags: [Executions]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: One entry per service, with the mean in minutes (one decimal) and how many repairs it covers
+   *         content:
+   *           application/json:
+   *             example: [{ "serviceId": "c0000000-0000-4000-8000-000000000001", "name": "Oil change", "avgMinutes": 42.5, "count": 3 }]
+   *       403:
+   *         description: Not an attendant or admin token
+   */
+  // Declared before /:serviceOrderId, which would otherwise take "stats" as an order id.
+  router.get('/stats/average-task-duration', authMiddleware, requireRole('attendant', 'admin'), (req, res, next) => controller.averageDuration(req, res, next));
+
+  /**
+   * @openapi
    * /executions/{serviceOrderId}:
    *   get:
    *     summary: Execution of a service order (mechanic, admin)
