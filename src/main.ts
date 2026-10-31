@@ -4,6 +4,12 @@ import 'dotenv/config';
 import './frameworks/tracing/start';
 import { SQSClient } from '@aws-sdk/client-sqs';
 import { createApp } from './app';
+import { executionRoutes } from './frameworks/http/routes/executionRoutes';
+import { ExecutionController } from './adapters/controllers/ExecutionController';
+import { ListQueueUseCase } from './use-cases/executions/ListQueueUseCase';
+import { GetExecutionUseCase } from './use-cases/executions/GetExecutionUseCase';
+import { StartStageUseCase } from './use-cases/executions/StartStageUseCase';
+import { FinishStageUseCase } from './use-cases/executions/FinishStageUseCase';
 import { documentClient, dynamoClient } from './frameworks/database/dynamoClient';
 import { tableReadiness } from './frameworks/database/readinessProbe';
 import { readTableNames, TableNames } from './frameworks/database/tableNames';
@@ -76,7 +82,14 @@ function main(): void {
     executions: new DynamoExecutionRepository(documentClient, tables.executions),
     store: new DynamoExecutionStore(documentClient, tables, new AsyncLocalStorageTraceContext()),
   };
-  const app = createApp(tableReadiness(dynamoClient, tables.executions));
+  const { executions, store } = persistence;
+  const controller = new ExecutionController(
+    new ListQueueUseCase(executions),
+    new GetExecutionUseCase(executions),
+    new StartStageUseCase(executions, store),
+    new FinishStageUseCase(executions, store),
+  );
+  const app = createApp(tableReadiness(dynamoClient, tables.executions), { executions: executionRoutes(controller) });
   const messaging = queues ? startMessaging(queues, tables, persistence) : undefined;
   if (!messaging) logger.warn('saga queues are not configured; the service runs without messaging');
 

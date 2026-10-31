@@ -42,6 +42,12 @@ DynamoDB local as mesmas tabelas que o Terraform cria na AWS.
 | `GET /ready` | Prontidão; responde 503 se a tabela de execuções não responde |
 | `GET /metrics` | Métricas no formato do Prometheus |
 | `GET /docs` | Swagger |
+| `GET /executions` | Fila do mecânico: em andamento primeiro, depois a fila, cada uma da mais antiga para a mais nova |
+| `GET /executions/{serviceOrderId}` | Execução de uma ordem, com etapa, status e tarefas |
+| `POST /executions/{serviceOrderId}/start` | Inicia a etapa atual (diagnóstico ou reparo) |
+| `POST /executions/{serviceOrderId}/finish` | Conclui a etapa atual |
+
+Quem pode chamar cada rota está em [docs/authorization-matrix.md](docs/authorization-matrix.md).
 
 ## Infraestrutura
 
