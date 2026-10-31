@@ -98,6 +98,27 @@ As pipelines de infraestrutura só rodam quando `terraform/` muda:
 O `Infra CD` e o `Infra destroy` usam os segredos `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e
 `AWS_SESSION_TOKEN` do repositório, que precisam ser atualizados a cada sessão do Learner Lab.
 
+## CI/CD
+
+O `CI` roda em todo pull request e em todo push na `main`: build, lint, testes, cobertura e validação dos
+manifestos. O `CD` dispara quando o `CI` termina verde na `main` e publica o serviço no EKS, no namespace
+`car-repair-shop-execution`:
+
+1. Build da imagem e push no ECR `car-repair-shop-execution`, com a tag do SHA curto do commit.
+2. Leitura de `JWT_SECRET` no SSM (`/car-repair-shop/auth/jwt-secret`, escrito pelo Terraform das
+   functions) e das URLs das filas `execution-commands` e `saga-replies`, criadas pelo `infra-k8s`. Se algum
+   valor faltar, o deploy para com `required value missing or empty: <nome>`.
+3. Confirmação de que as três tabelas existem e estão `ACTIVE`. Os nomes são lidos do próprio
+   `k8s/01-config/configmap.yaml`, então a checagem e a aplicação não têm como olhar para tabelas diferentes.
+   Sem essa etapa, uma tabela ausente só apareceria como pods que nunca passam na readiness.
+4. ConfigMap `execution-runtime` e Secret `execution-secret`, seguidos dos manifestos de `k8s/`.
+5. Troca da imagem do Deployment e espera do rollout; se ele não fica pronto em 5 minutos, o CD volta para
+   a revisão anterior e termina com erro.
+6. Verificação de `/ready` dentro de um pod, que confirma também o acesso ao DynamoDB pelo papel do node.
+
+Não há etapa de migration, porque as tabelas vêm do Terraform. Os únicos segredos do GitHub são os três da
+AWS, e cada deploy fica registrado em **Deployments → production**.
+
 ## Testes
 
 ```bash
