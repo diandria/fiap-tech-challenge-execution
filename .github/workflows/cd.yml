@@ -1,0 +1,201 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+# One deploy at a time: two consecutive merges would compete for the cluster.
+# Named per service, so an execution deploy never waits for the OS one.
+concurrency:
+  group: deploy-execution
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      # `sts get-caller-identity` keeps answering after the Learner Lab session
+      # is revoked; only a call touching a real resource reveals the expiry.
+      - name: Verify credentials are usable
+        run: aws ec2 describe-vpcs --max-items 1 > /dev/null
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Resolve image tag
+        id: meta
+        run: |
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "registry=${{ steps.ecr.outputs.registry }}/car-repair-shop-execution" >> "$GITHUB_OUTPUT"
+
+      # Tagged by SHA: with `latest` a rollback is impossible and a restarting
+      # pod can come back on a different image. The ECR repository is IMMUTABLE,
+      # so pushing the same SHA twice fails instead of replacing silently.
+      - name: Build and push
+        env:
+          IMAGE: ${{ steps.meta.outputs.registry }}
+          TAG: ${{ steps.meta.outputs.sha }}
+        run: |
+          docker build -t "$IMAGE:$TAG" .
+          docker push "$IMAGE:$TAG"
+
+      - name: Confirm the image is in the registry
+        env:
+          TAG: ${{ steps.meta.outputs.sha }}
+        run: |
+          aws ecr describe-images \
+            --repository-name car-repair-shop-execution \
+            --image-ids imageTag="$TAG" \
+            --query 'imageDetails[0].imagePushedAt' --output text
+
+  deploy:
+    name: Deploy to EKS
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    # `main` is production; there is no staging. No protection rule: a
+    # required reviewer would stall the CD; the safety net is the required PR
+    # plus automatic rollback.
+    environment:
+      name: production
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Connect to the cluster
+        run: aws eks update-kubeconfig --name car-repair-shop --region us-east-1
+
+      - name: Resolve image reference
+        id: meta
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          REPO=$(aws ecr describe-repositories --repository-names car-repair-shop-execution \
+            --query 'repositories[0].repositoryUri' --output text)
+          echo "image=$REPO" >> "$GITHUB_OUTPUT"
+
+      # The queues come from infra-k8s and the JWT secret from the functions'
+      # Terraform; nothing comes from GitHub.
+      - name: Read configuration from SSM and AWS
+        run: |
+          set -euo pipefail
+
+          queue_url() {
+            aws sqs get-queue-url --queue-name "car-repair-shop-$1.fifo" --query QueueUrl --output text 2>/dev/null || true
+          }
+
+          JWT=$(aws ssm get-parameter --name /car-repair-shop/auth/jwt-secret \
+            --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || true)
+          QUEUE_COMMANDS=$(queue_url execution-commands)
+          QUEUE_REPLIES=$(queue_url saga-replies)
+
+          # Fail here, not later with a CrashLoop three layers from the cause.
+          for name in JWT QUEUE_COMMANDS QUEUE_REPLIES; do
+            value="${!name}"
+            if [ -z "$value" ] || [ "$value" = "None" ]; then
+              echo "::error::required value missing or empty: $name"
+              exit 1
+            fi
+          done
+
+          echo "::add-mask::$JWT"
+
+          {
+            echo "JWT_SECRET=$JWT"
+            echo "QUEUE_URL_EXECUTION_COMMANDS=$QUEUE_COMMANDS"
+            echo "QUEUE_URL_SAGA_REPLIES=$QUEUE_REPLIES"
+          } >> "$GITHUB_ENV"
+
+      # The names are read from the ConfigMap the pods use, so the check and
+      # the application cannot disagree. Without this, a missing table shows up
+      # only as pods that never pass readiness.
+      - name: Confirm the tables exist
+        run: |
+          set -euo pipefail
+
+          for key in EXECUTIONS_TABLE EXECUTION_OUTBOX_TABLE PROCESSED_MESSAGES_TABLE; do
+            table=$(yq ".data.$key" k8s/01-config/configmap.yaml)
+            status=$(aws dynamodb describe-table --table-name "$table" \
+              --query 'Table.TableStatus' --output text 2>/dev/null || true)
+            if [ "$status" != "ACTIVE" ]; then
+              echo "::error::table $table is ${status:-missing}; apply this repository's terraform first"
+              exit 1
+            fi
+            echo "$table: $status"
+          done
+
+      - name: Apply configuration and secrets
+        run: |
+          set -euo pipefail
+
+          kubectl create configmap execution-runtime -n car-repair-shop-execution \
+            --from-literal=QUEUE_URL_EXECUTION_COMMANDS="$QUEUE_URL_EXECUTION_COMMANDS" \
+            --from-literal=QUEUE_URL_SAGA_REPLIES="$QUEUE_URL_SAGA_REPLIES" \
+            --from-literal=OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo.observability.svc.cluster.local:4318 \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl create secret generic execution-secret -n car-repair-shop-execution \
+            --from-literal=JWT_SECRET="$JWT_SECRET" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl apply -f k8s/01-config/ -f k8s/02-service/ -f k8s/03-app/
+
+      - name: Deploy the new image
+        id: rollout
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}"
+
+          kubectl set image deployment/execution-api api="$IMAGE" -n car-repair-shop-execution
+          kubectl rollout status deployment/execution-api -n car-repair-shop-execution --timeout=300s
+
+      # Ends with `exit 1` after undoing: a green workflow would hide that the
+      # deploy failed.
+      - name: Roll back on failure
+        if: failure() && steps.rollout.outcome == 'failure'
+        run: |
+          echo "::error::rollout failed; undoing to the previous revision"
+          kubectl rollout undo deployment/execution-api -n car-repair-shop-execution
+          kubectl rollout status deployment/execution-api -n car-repair-shop-execution --timeout=180s
+          kubectl get pods -n car-repair-shop-execution -o wide
+          exit 1
+
+      # Inside the pod, not through the gateway: there, /health belongs to the
+      # OS Service. /ready also proves DynamoDB answers with the node role.
+      - name: Smoke check inside the pod
+        run: |
+          set -euo pipefail
+          kubectl exec deploy/execution-api -n car-repair-shop-execution -- \
+            wget -qO- http://localhost:3000/ready
+          echo
+          echo "execution answered /ready"
