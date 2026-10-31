@@ -43,6 +43,24 @@ DynamoDB local as mesmas tabelas que o Terraform cria na AWS.
 | `GET /metrics` | Métricas no formato do Prometheus |
 | `GET /docs` | Swagger |
 
+## Kubernetes
+
+Os manifestos ficam em `k8s/` e seguem os do OS Service e do Billing, no namespace
+`car-repair-shop-execution`, que o `infra-k8s` cria junto com o cluster.
+
+| Recurso | Nome | Detalhe |
+|---|---|---|
+| ConfigMap | `execution-config` | Variáveis fixas, inclusive os nomes das tabelas |
+| Service | `execution-api` | NLB interno; o API Gateway chega nele pela tag `service.k8s.aws/stack = car-repair-shop-execution/execution-api` |
+| Deployment | `execution-api` | Probes em `/health` e `/ready`, rolling update de 25% |
+| HPA | `execution-api` | De 2 a 4 réplicas por CPU, cabendo no cluster compartilhado com os outros serviços |
+| PodDisruptionBudget | `execution-api` | Pelo menos uma réplica durante a drenagem de um node |
+
+Não há Job de migração: o DynamoDB não tem schema a migrar, e as tabelas vêm do Terraform deste repositório.
+O pipeline de deploy cria o ConfigMap `execution-runtime` (URLs das filas da saga) e o Secret
+`execution-secret` (`JWT_SECRET`). O pod acessa o DynamoDB com o papel do node, sem credencial própria. O CI
+valida os manifestos com `kubeconform -strict`.
+
 ## Infraestrutura
 
 As tabelas do Execution são provisionadas por este repositório, na pasta `terraform/`, com estado próprio
