@@ -6,3 +6,10 @@ export const outboxPublished = new Counter({
   help: 'Outbox messages published to their queue',
   registers: [registry],
 });
+
+export const messagesConsumed = new Counter({
+  name: 'messages_consumed_total',
+  help: 'Messages taken from a queue, by outcome',
+  labelNames: ['queue', 'type', 'outcome'],
+  registers: [registry],
+});
