@@ -22,6 +22,20 @@ export class DynamoExecutionRepository implements IExecutionRepository {
   }
 
   async listByStatus(status: 'QUEUED' | 'IN_PROGRESS'): Promise<Execution[]> {
+    return this.queryByStatus(status);
+  }
+
+  /**
+   * DynamoDB does not aggregate, so the statistics are computed from the
+   * finished repairs themselves. The status index narrows the read to DONE,
+   * and the filter drops finished diagnoses. At the volume of a workshop this
+   * stays small; a larger one would keep a running total per service instead.
+   */
+  async listFinishedRepairs(): Promise<Execution[]> {
+    return this.queryByStatus('DONE', 'REPAIR');
+  }
+
+  private async queryByStatus(status: string, stage?: string): Promise<Execution[]> {
     const executions: Execution[] = [];
     let startKey: Record<string, unknown> | undefined;
 
@@ -32,8 +46,9 @@ export class DynamoExecutionRepository implements IExecutionRepository {
         TableName: this.tableName,
         IndexName: QUEUE_INDEX,
         KeyConditionExpression: '#status = :status',
+        ...(stage && { FilterExpression: 'stage = :stage' }),
         ExpressionAttributeNames: { '#status': 'status' },
-        ExpressionAttributeValues: { ':status': status },
+        ExpressionAttributeValues: { ':status': status, ...(stage && { ':stage': stage }) },
         ScanIndexForward: true,
         ExclusiveStartKey: startKey,
       }));

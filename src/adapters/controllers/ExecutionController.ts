@@ -3,6 +3,8 @@ import { ListQueueUseCase } from '../../use-cases/executions/ListQueueUseCase';
 import { GetExecutionUseCase } from '../../use-cases/executions/GetExecutionUseCase';
 import { StartStageUseCase } from '../../use-cases/executions/StartStageUseCase';
 import { FinishStageUseCase } from '../../use-cases/executions/FinishStageUseCase';
+import { UpdateTaskUseCase } from '../../use-cases/executions/UpdateTaskUseCase';
+import { GetAverageTaskDurationUseCase } from '../../use-cases/executions/GetAverageTaskDurationUseCase';
 import { ExecutionPresenter } from '../presenters/ExecutionPresenter';
 
 export class ExecutionController {
@@ -11,6 +13,8 @@ export class ExecutionController {
     private readonly getExecution: GetExecutionUseCase,
     private readonly startStage: StartStageUseCase,
     private readonly finishStage: FinishStageUseCase,
+    private readonly updateTask: UpdateTaskUseCase,
+    private readonly averageTaskDuration: GetAverageTaskDurationUseCase,
   ) {}
 
   async list(_req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -38,6 +42,24 @@ export class ExecutionController {
     try {
       const { status, body } = ExecutionPresenter.ok(await this.finishStage.execute(req.params.serviceOrderId));
       res.status(status).json(body);
+    } catch (err) { next(err); }
+  }
+
+  async updateTaskStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const execution = await this.updateTask.execute({
+        serviceOrderId: req.params.serviceOrderId,
+        serviceId: req.params.serviceId,
+        status: req.body?.status,
+      });
+      const { status, body } = ExecutionPresenter.ok(execution);
+      res.status(status).json(body);
+    } catch (err) { next(err); }
+  }
+
+  async averageDuration(_req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      res.status(200).json(await this.averageTaskDuration.execute());
     } catch (err) { next(err); }
   }
 }

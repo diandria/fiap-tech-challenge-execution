@@ -20,8 +20,11 @@ de cliente é válido, mas nenhuma rota daqui aceita cliente.
 | GET | `/executions/{serviceOrderId}` | 401 | sim | sim | 403 | 403 |
 | POST | `/executions/{serviceOrderId}/start` | 401 | sim | sim | 403 | 403 |
 | POST | `/executions/{serviceOrderId}/finish` | 401 | sim | sim | 403 | 403 |
+| PATCH | `/executions/{serviceOrderId}/tasks/{serviceId}` | 401 | sim | sim | 403 | 403 |
+| GET | `/executions/stats/average-task-duration` | 401 | 403 | sim | sim | 403 |
 
-Os perfis são os mesmos que movem a ordem entre diagnóstico e reparo no OS Service.
+Os perfis são os mesmos das rotas que estas substituem no OS Service: mecânico e admin movem a ordem e cada
+serviço; atendente e admin consultam a média de duração.
 
 ## Regras das ações
 
@@ -29,5 +32,8 @@ Os perfis são os mesmos que movem a ordem entre diagnóstico e reparo no OS Ser
   (diagnóstico ou reparo), então o mecânico não consegue pular etapa.
 - **Cada ação vira uma resposta à saga**, gravada junto com a mudança: `DiagnosisStarted`,
   `DiagnosisCompleted`, `RepairStarted` e `RepairCompleted`.
+- **Cada serviço do reparo** começa uma vez e termina uma vez, depois de começar, e só com o reparo em
+  andamento; fora disso, 400. Serviço que não faz parte do reparo responde 404. Essas marcações não geram
+  resposta à saga.
 - **Transição inválida responde 400**, por exemplo iniciar uma etapa que não está na fila.
 - **Duas ações ao mesmo tempo na mesma ordem**: a segunda bate na versão da execução e responde 409.

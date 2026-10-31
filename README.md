@@ -46,6 +46,8 @@ DynamoDB local as mesmas tabelas que o Terraform cria na AWS.
 | `GET /executions/{serviceOrderId}` | Execução de uma ordem, com etapa, status e tarefas |
 | `POST /executions/{serviceOrderId}/start` | Inicia a etapa atual (diagnóstico ou reparo) |
 | `POST /executions/{serviceOrderId}/finish` | Conclui a etapa atual |
+| `PATCH /executions/{serviceOrderId}/tasks/{serviceId}` | Marca início ou fim de um serviço do reparo |
+| `GET /executions/stats/average-task-duration` | Média de duração de cada serviço nos reparos concluídos |
 
 Quem pode chamar cada rota está em [docs/authorization-matrix.md](docs/authorization-matrix.md).
 

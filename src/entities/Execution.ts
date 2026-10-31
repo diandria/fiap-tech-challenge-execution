@@ -1,4 +1,4 @@
-import { ValidationError } from './errors/AppError';
+import { NotFoundError, ValidationError } from './errors/AppError';
 
 export type ExecutionStage = 'DIAGNOSIS' | 'REPAIR';
 export type ExecutionStatus = 'QUEUED' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
@@ -67,4 +67,32 @@ export function finish(execution: Execution, now: Date): Execution {
 export function cancel(execution: Execution): Execution {
   if (execution.stage !== 'DIAGNOSIS' || execution.status === 'CANCELLED') return execution;
   return { ...execution, status: 'CANCELLED' };
+}
+
+/** Tasks are worked on only while the repair is in progress. */
+function taskOf(execution: Execution, serviceId: string, action: string): ExecutionTask {
+  if (execution.stage !== 'REPAIR' || execution.status !== 'IN_PROGRESS') refuse(execution, action);
+  const task = execution.tasks.find((candidate) => candidate.serviceId === serviceId);
+  if (!task) throw new NotFoundError('Service in repair');
+  return task;
+}
+
+function withTask(execution: Execution, serviceId: string, change: Partial<ExecutionTask>): Execution {
+  return {
+    ...execution,
+    tasks: execution.tasks.map((task) => (task.serviceId === serviceId ? { ...task, ...change } : task)),
+  };
+}
+
+export function startTask(execution: Execution, serviceId: string, now: Date): Execution {
+  const task = taskOf(execution, serviceId, 'start a service of');
+  if (task.startedAt) throw new ValidationError('Service already started');
+  return withTask(execution, serviceId, { startedAt: now });
+}
+
+export function finishTask(execution: Execution, serviceId: string, now: Date): Execution {
+  const task = taskOf(execution, serviceId, 'finish a service of');
+  if (!task.startedAt) throw new ValidationError('Service has not been started');
+  if (task.finishedAt) throw new ValidationError('Service already finished');
+  return withTask(execution, serviceId, { finishedAt: now });
 }

@@ -16,8 +16,10 @@ import { ListQueueUseCase } from '../../src/use-cases/executions/ListQueueUseCas
 import { GetExecutionUseCase } from '../../src/use-cases/executions/GetExecutionUseCase';
 import { StartStageUseCase } from '../../src/use-cases/executions/StartStageUseCase';
 import { FinishStageUseCase } from '../../src/use-cases/executions/FinishStageUseCase';
+import { UpdateTaskUseCase } from '../../src/use-cases/executions/UpdateTaskUseCase';
+import { GetAverageTaskDurationUseCase } from '../../src/use-cases/executions/GetAverageTaskDurationUseCase';
 import { PublishPendingMessagesUseCase } from '../../src/use-cases/messaging/PublishPendingMessagesUseCase';
-import { Execution, finish, queueDiagnosis, start } from '../../src/entities/Execution';
+import { Execution, finish, finishTask, queueDiagnosis, queueRepair, start, startTask } from '../../src/entities/Execution';
 
 let dynamo: TestDynamo;
 let sqs: SQSClient;
@@ -40,6 +42,8 @@ beforeAll(async () => {
     new GetExecutionUseCase(executions),
     new StartStageUseCase(executions, store),
     new FinishStageUseCase(executions, store),
+    new UpdateTaskUseCase(executions, store),
+    new GetAverageTaskDurationUseCase(executions),
   );
   app = createApp(tableReadiness(dynamo.client, dynamo.tables.executions), { executions: executionRoutes(controller) });
 
@@ -154,5 +158,73 @@ describe('Mechanic queue API', () => {
 
     // THEN
     expect(res.status).toBe(404);
+  });
+
+  it('GIVEN a repair in progress with a started service WHEN PATCH task COMPLETED THEN both timestamps are stored', async () => {
+    // GIVEN
+    const serviceOrderId = nextOrderId();
+    const serviceId = 'c0000000-0000-4000-8000-000000000001';
+    const diagnosed = finish(start(queueDiagnosis(serviceOrderId, new Date()), new Date()), new Date());
+    const repair = start(queueRepair(diagnosed, [{ serviceId, name: 'Oil change' }], new Date()), new Date());
+    await seed(startTask(repair, serviceId, new Date('2026-10-31T12:00:00.000Z')));
+
+    // WHEN
+    const res = await request(app)
+      .patch(`/executions/${serviceOrderId}/tasks/${serviceId}`)
+      .set('Authorization', `Bearer ${staffToken('mechanic')}`)
+      .send({ status: 'COMPLETED' });
+
+    // THEN
+    expect(res.status).toBe(200);
+    expect(res.body.tasks).toEqual([
+      { serviceId, name: 'Oil change', startedAt: '2026-10-31T12:00:00.000Z', finishedAt: expect.any(String) },
+    ]);
+  });
+
+  it('GIVEN a repair in progress WHEN PATCH a service that is not part of it THEN returns 404', async () => {
+    // GIVEN
+    const serviceOrderId = nextOrderId();
+    const diagnosed = finish(start(queueDiagnosis(serviceOrderId, new Date()), new Date()), new Date());
+    await seed(start(queueRepair(diagnosed, [{ serviceId: 'c0000000-0000-4000-8000-000000000001', name: 'Oil change' }], new Date()), new Date()));
+
+    // WHEN
+    const res = await request(app)
+      .patch(`/executions/${serviceOrderId}/tasks/c0000000-0000-4000-8000-000000000099`)
+      .set('Authorization', `Bearer ${staffToken('mechanic')}`)
+      .send({ status: 'IN_PROGRESS' });
+
+    // THEN
+    expect(res.status).toBe(404);
+  });
+
+  it('GIVEN two finished repairs sharing a service WHEN GET average-task-duration THEN returns the mean for that service', async () => {
+    // GIVEN
+    const serviceId = 'c0000000-0000-4000-8000-000000000042';
+    for (const minutes of [20, 40]) {
+      const serviceOrderId = nextOrderId();
+      const diagnosed = finish(start(queueDiagnosis(serviceOrderId, new Date()), new Date()), new Date());
+      const repair = start(queueRepair(diagnosed, [{ serviceId, name: 'Suspension check' }], new Date()), new Date());
+      const started = startTask(repair, serviceId, new Date('2026-10-31T12:00:00.000Z'));
+      const worked = finishTask(started, serviceId, new Date(Date.parse('2026-10-31T12:00:00.000Z') + minutes * 60_000));
+      await seed(finish(worked, new Date()));
+    }
+
+    // WHEN
+    const res = await request(app).get('/executions/stats/average-task-duration').set('Authorization', `Bearer ${staffToken('attendant')}`);
+
+    // THEN
+    expect(res.status).toBe(200);
+    expect(res.body).toContainEqual({ serviceId, name: 'Suspension check', avgMinutes: 30, count: 2 });
+  });
+
+  it('GIVEN a mechanic token WHEN GET average-task-duration THEN returns 403', async () => {
+    // GIVEN
+    const token = staffToken('mechanic');
+
+    // WHEN
+    const res = await request(app).get('/executions/stats/average-task-duration').set('Authorization', `Bearer ${token}`);
+
+    // THEN
+    expect(res.status).toBe(403);
   });
 });
