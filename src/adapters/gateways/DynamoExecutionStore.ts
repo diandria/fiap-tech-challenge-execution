@@ -36,7 +36,7 @@ export class DynamoExecutionStore implements IExecutionStore {
   async save(changes: ExecutionChanges): Promise<void> {
     const now = this.now();
     const items: TransactItem[] = [
-      this.executionPut(changes),
+      ...(changes.execution ? [this.executionPut(changes.execution)] : []),
       ...changes.messages.map((message) => this.outboxPut(message, now)),
     ];
     // The marker goes last, so its cancellation reason is the last one.
@@ -49,12 +49,12 @@ export class DynamoExecutionStore implements IExecutionStore {
     }
   }
 
-  private executionPut({ execution, expectedVersion }: ExecutionChanges): TransactItem {
+  private executionPut({ state, expectedVersion }: NonNullable<ExecutionChanges['execution']>): TransactItem {
     const isNew = expectedVersion === null;
     return {
       Put: {
         TableName: this.tables.executions,
-        Item: toItem({ ...execution, version: isNew ? 0 : expectedVersion + 1 }),
+        Item: toItem({ ...state, version: isNew ? 0 : expectedVersion + 1 }),
         ConditionExpression: isNew ? 'attribute_not_exists(serviceOrderId)' : 'version = :expected',
         ...(!isNew && { ExpressionAttributeValues: { ':expected': expectedVersion } }),
       },
@@ -105,7 +105,7 @@ export class DynamoExecutionStore implements IExecutionStore {
     if (changes.processedMessage && failed(reasons.length - 1)) {
       return new DuplicateMessageError(changes.processedMessage.messageId);
     }
-    if (failed(0)) {
+    if (changes.execution && failed(0)) {
       return new ConflictError('Execution was changed by another request; read it again');
     }
     return err;

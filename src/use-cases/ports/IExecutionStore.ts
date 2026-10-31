@@ -3,9 +3,12 @@ import { OutgoingMessage } from '../messaging/MessageEnvelope';
 
 /** Everything one change writes, saved together or not at all. */
 export interface ExecutionChanges {
-  execution: Execution;
-  /** The version the change was computed from; null when the execution must not exist yet. */
-  expectedVersion: number | null;
+  /** Absent when the change only replies, without touching any execution. */
+  execution?: {
+    state: Execution;
+    /** The version the state was computed from; null when the execution must not exist yet. */
+    expectedVersion: number | null;
+  };
   /** Replies to the saga. */
   messages: OutgoingMessage[];
   /** The command that caused the change, recorded so a redelivery has no effect. */

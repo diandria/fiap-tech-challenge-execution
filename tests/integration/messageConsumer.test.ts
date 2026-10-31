@@ -45,8 +45,7 @@ async function deliver(queue: FifoQueue, message: MessageEnvelope, deduplication
 /** Queues a diagnosis the way the real command will, recording the command in the same write. */
 const enqueueDiagnosis = new ExecutionCommandHandler({
   EnqueueDiagnosis: (message) => store.save({
-    execution: queueDiagnosis(message.serviceOrderId, new Date()),
-    expectedVersion: null,
+    execution: { state: queueDiagnosis(message.serviceOrderId, new Date()), expectedVersion: null },
     messages: [],
     processedMessage: { messageId: message.messageId, type: message.type },
   }),

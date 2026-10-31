@@ -34,8 +34,7 @@ describe('Outbox relay', () => {
   it('GIVEN a save with one reply WHEN the relay runs THEN the reply reaches the replies queue and the outbox is empty', async () => {
     // GIVEN
     await store.save({
-      execution: queueDiagnosis(serviceOrderId, new Date()),
-      expectedVersion: null,
+      execution: { state: queueDiagnosis(serviceOrderId, new Date()), expectedVersion: null },
       messages: [{ destination: 'saga-replies', type: 'DiagnosisQueued', serviceOrderId, payload: {} }],
     });
 

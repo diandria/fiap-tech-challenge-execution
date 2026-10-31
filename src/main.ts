@@ -16,6 +16,14 @@ import { DynamoOutboxStore } from './adapters/gateways/DynamoOutboxStore';
 import { SqsMessageSender } from './adapters/messaging/SqsMessageSender';
 import { ExecutionCommandHandler } from './adapters/messaging/ExecutionCommandHandler';
 import { PublishPendingMessagesUseCase } from './use-cases/messaging/PublishPendingMessagesUseCase';
+import { EnqueueDiagnosisUseCase } from './use-cases/executions/EnqueueDiagnosisUseCase';
+import { EnqueueRepairUseCase } from './use-cases/executions/EnqueueRepairUseCase';
+import { CancelExecutionUseCase } from './use-cases/executions/CancelExecutionUseCase';
+import { IExecutionRepository } from './use-cases/ports/IExecutionRepository';
+import { IExecutionStore } from './use-cases/ports/IExecutionStore';
+import { DynamoExecutionRepository } from './adapters/gateways/DynamoExecutionRepository';
+import { DynamoExecutionStore } from './adapters/gateways/DynamoExecutionStore';
+import { AsyncLocalStorageTraceContext } from './frameworks/logging/AsyncLocalStorageTraceContext';
 
 const PORT = process.env.PORT ?? 3000;
 
@@ -26,7 +34,12 @@ interface Messaging {
   stop(): Promise<void>;
 }
 
-function startMessaging(queues: QueueConfig, tables: TableNames): Messaging {
+interface Persistence {
+  executions: IExecutionRepository;
+  store: IExecutionStore;
+}
+
+function startMessaging(queues: QueueConfig, tables: TableNames, { executions, store }: Persistence): Messaging {
   const sqs = new SQSClient({});
   const sender = new SqsMessageSender(sqs, queues.destinations, new PrometheusIntegrationFailures());
   const relay = new OutboxRelay(
@@ -34,12 +47,15 @@ function startMessaging(queues: QueueConfig, tables: TableNames): Messaging {
     logger,
     { batchSize: OUTBOX_BATCH_SIZE, idleDelayMs: 1000 },
   );
-  const poller = new SqsQueuePoller(
-    sqs,
-    { name: 'execution-commands', url: queues.executionCommands },
-    new ExecutionCommandHandler({}),
-    logger,
-  );
+  const enqueueDiagnosis = new EnqueueDiagnosisUseCase(executions, store);
+  const enqueueRepair = new EnqueueRepairUseCase(executions, store);
+  const cancelExecution = new CancelExecutionUseCase(executions, store);
+  const commands = new ExecutionCommandHandler({
+    EnqueueDiagnosis: (command) => enqueueDiagnosis.execute(command),
+    EnqueueRepair: (command) => enqueueRepair.execute(command),
+    CancelExecution: (command) => cancelExecution.execute(command),
+  });
+  const poller = new SqsQueuePoller(sqs, { name: 'execution-commands', url: queues.executionCommands }, commands, logger);
 
   relay.start();
   poller.start();
@@ -56,8 +72,12 @@ function startMessaging(queues: QueueConfig, tables: TableNames): Messaging {
 function main(): void {
   const tables = readTableNames();
   const queues = readQueueConfig();
+  const persistence: Persistence = {
+    executions: new DynamoExecutionRepository(documentClient, tables.executions),
+    store: new DynamoExecutionStore(documentClient, tables, new AsyncLocalStorageTraceContext()),
+  };
   const app = createApp(tableReadiness(dynamoClient, tables.executions));
-  const messaging = queues ? startMessaging(queues, tables) : undefined;
+  const messaging = queues ? startMessaging(queues, tables, persistence) : undefined;
   if (!messaging) logger.warn('saga queues are not configured; the service runs without messaging');
 
   const server = app.listen(PORT, () => { logger.info({ port: PORT }, 'server started'); });
