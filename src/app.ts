@@ -1,4 +1,4 @@
-import express, { Application, Request, Response, NextFunction } from 'express';
+import express, { Application, Request, Response, NextFunction, Router } from 'express';
 import helmet from 'helmet';
 import { errorMiddleware } from './frameworks/http/middlewares/errorMiddleware';
 import { traceContextMiddleware } from './frameworks/http/middlewares/traceContextMiddleware';
@@ -6,7 +6,12 @@ import { requestLoggerMiddleware } from './frameworks/http/middlewares/requestLo
 import { setupSwagger } from './frameworks/http/swagger/setup';
 import { healthRoutes, ReadinessCheck } from './frameworks/http/routes/healthRoutes';
 
-export function createApp(checkDatabase: ReadinessCheck): Application {
+export interface AppRoutes {
+  executions: Router;
+}
+
+/** Without routes the app serves only health, metrics and docs, which is what the probe tests need. */
+export function createApp(checkDatabase: ReadinessCheck, routes?: AppRoutes): Application {
   const app = express();
 
   // How many proxies sit in front, so req.ip is the caller and not the gateway.
@@ -47,6 +52,7 @@ export function createApp(checkDatabase: ReadinessCheck): Application {
   setupSwagger(app);
 
   app.use('/', healthRoutes(checkDatabase));
+  if (routes) app.use('/executions', routes.executions);
 
   app.use(errorMiddleware);
 
