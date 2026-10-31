@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+.env
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+!*.tfvars.example
