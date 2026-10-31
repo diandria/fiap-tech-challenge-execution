@@ -1,0 +1,46 @@
+# Execution Service on its own: DynamoDB local and a local SQS. Host ports
+# differ from the other services' composes, so all of them can run side by side.
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:3.3.1
+    container_name: execution-dynamodb
+    ports:
+      - "8000:8000"
+
+  # Pinned to the last community release: newer images refuse to start
+  # without a license token.
+  localstack:
+    image: localstack/localstack:4.9.2
+    container_name: execution-localstack
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "4568:4566"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "3002:3000"
+    environment:
+      PORT: "3000"
+      AWS_ENDPOINT_URL: "http://dynamodb:8000"
+      AWS_REGION: "us-east-1"
+      AWS_ACCESS_KEY_ID: "local"
+      AWS_SECRET_ACCESS_KEY: "local"
+      JWT_SECRET: "dev-secret-change-in-prod"
+      OTEL_SERVICE_NAME: "execution-service"
+    depends_on:
+      - dynamodb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
