@@ -1,7 +1,7 @@
 import pino from 'pino';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { startDynamo, stopDynamo, TestDynamo } from '../helpers/dynamodb';
-import { startLocalStack, stopLocalStack, createFifoQueue, receiveAll, FifoQueue } from '../helpers/localstack';
+import { startLocalStack, stopLocalStack, createFifoQueue, receiveAll, pollUntilDeadLettered, FifoQueue } from '../helpers/localstack';
 import { DynamoExecutionStore } from '../../src/adapters/gateways/DynamoExecutionStore';
 import { DynamoExecutionRepository } from '../../src/adapters/gateways/DynamoExecutionRepository';
 import { ExecutionCommandHandler } from '../../src/adapters/messaging/ExecutionCommandHandler';
@@ -82,9 +82,7 @@ describe('Execution command consumer', () => {
     const poller = new SqsQueuePoller(sqs, { name: 'execution-commands', url: queue.url }, enqueueDiagnosis, silentLog, { waitTimeSeconds: 2 });
 
     // WHEN
-    for (let attempt = 0; attempt < 7; attempt++) {
-      await poller.pollOnce();
-    }
+    await pollUntilDeadLettered(sqs, poller, queue.deadLetterUrl);
 
     // THEN
     const deadLetters = await receiveAll(sqs, queue.deadLetterUrl, 2);

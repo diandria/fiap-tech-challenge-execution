@@ -51,3 +51,21 @@ describe('Outbox relay', () => {
     expect(Count).toBe(0);
   });
 });
+
+describe('Outbox backlog', () => {
+  it('GIVEN two saves whose replies were not published WHEN the store counts the backlog THEN both count', async () => {
+    // GIVEN
+    for (const orderId of ['22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333']) {
+      await store.save({
+        execution: { state: queueDiagnosis(orderId, new Date()), expectedVersion: null },
+        messages: [{ destination: 'saga-replies', type: 'DiagnosisQueued', serviceOrderId: orderId, payload: {} }],
+      });
+    }
+
+    // WHEN
+    const pending = await new DynamoOutboxStore(dynamo.documents, dynamo.tables.outbox).countPending();
+
+    // THEN
+    expect(pending).toBe(2);
+  });
+});

@@ -57,4 +57,16 @@ describe('DynamoOutboxStore', () => {
     expect(command).toBeInstanceOf(DeleteCommand);
     expect(command.input).toEqual({ TableName: 'outbox', Key: { messageId: 'm-1' } });
   });
+
+  it('counts the pending messages across every page of the scan', async () => {
+    const send = jest.fn()
+      .mockResolvedValueOnce({ Count: 3, LastEvaluatedKey: { messageId: 'm-3' } })
+      .mockResolvedValueOnce({ Count: 2 });
+
+    const pending = await new DynamoOutboxStore({ send } as never, 'outbox').countPending();
+
+    expect(pending).toBe(5);
+    expect(send.mock.calls[0][0].input).toMatchObject({ TableName: 'outbox', Select: 'COUNT', ConsistentRead: true });
+    expect(send.mock.calls[1][0].input).toMatchObject({ ExclusiveStartKey: { messageId: 'm-3' } });
+  });
 });
