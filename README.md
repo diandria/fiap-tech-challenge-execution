@@ -115,8 +115,9 @@ O `Infra CD` e o `Infra destroy` usam os segredos `AWS_ACCESS_KEY_ID`, `AWS_SECR
 
 ## CI/CD
 
-O `CI` roda em todo pull request e em todo push na `main`: build, lint, testes, cobertura e validação dos
-manifestos. O `CD` dispara quando o `CI` termina verde na `main` e publica o serviço no EKS, no namespace
+O `CI` roda em todo pull request e em todo push na `main`: build, lint, testes, cobertura, validação dos
+manifestos e a análise no [SonarQube Cloud](https://sonarcloud.io/project/overview?id=diandria_fiap-tech-challenge-execution), que reprova
+o PR quando o quality gate reprova (`sonar.qualitygate.wait`) ou quando o segredo `SONAR_TOKEN` falta. O `CD` dispara quando o `CI` termina verde na `main` e publica o serviço no EKS, no namespace
 `car-repair-shop-execution`:
 
 1. Build da imagem e push no ECR `car-repair-shop-execution`, com a tag do SHA curto do commit.
@@ -147,7 +148,8 @@ Os testes de integração seguem o padrão GIVEN / WHEN / THEN.
 
 O mínimo de 80% vale para linhas, branches, funções e statements, e o `npm run test:coverage` falha abaixo
 dele. O job `Coverage` do [CI](https://github.com/diandria/fiap-tech-challenge-execution/actions/workflows/ci.yml)
-roda em todo PR e guarda o relatório HTML como artefato do run.
+roda em todo PR e guarda o relatório HTML como artefato do run. O mesmo relatório alimenta a análise do
+[SonarQube Cloud](https://sonarcloud.io/project/overview?id=diandria_fiap-tech-challenge-execution).
 
 | Linhas | Statements | Funções | Branches |
 |---|---|---|---|
