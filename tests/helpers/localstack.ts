@@ -88,3 +88,28 @@ export async function receiveAll(client: SQSClient, queueUrl: string, waitTimeSe
   }));
   return result.Messages ?? [];
 }
+
+/**
+ * Polls the source queue until its message is moved to the dead-letter queue.
+ * SQS moves a message on a receive made after its visibility timeout, so a
+ * fixed number of polls races the queue's timing and fails on a loaded
+ * machine. This waits for the move itself, and counts the dead-letter queue
+ * without receiving from it, so the message is still there for the test.
+ */
+export async function pollUntilDeadLettered(
+  client: SQSClient,
+  poller: { pollOnce(): Promise<number> },
+  deadLetterUrl: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    await poller.pollOnce();
+    const { Attributes } = await client.send(new GetQueueAttributesCommand({
+      QueueUrl: deadLetterUrl,
+      AttributeNames: ['ApproximateNumberOfMessages'],
+    }));
+    if (Number(Attributes?.ApproximateNumberOfMessages ?? 0) > 0) return;
+    if (Date.now() >= deadline) throw new Error(`no message reached ${deadLetterUrl} within ${timeoutMs / 1000}s`);
+  }
+}
