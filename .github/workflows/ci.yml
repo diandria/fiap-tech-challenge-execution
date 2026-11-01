@@ -90,6 +90,54 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
+  # Static analysis on SonarQube Cloud. With sonar.qualitygate.wait the
+  # scanner waits for the quality gate and fails the job when the gate fails,
+  # which makes this a blocking check.
+  sonar:
+    name: SonarQube
+    needs: coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      # Full history: Sonar needs it for authorship and for "new code".
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # The type information in node_modules feeds the TypeScript rules.
+      - name: Install dependencies
+        run: npm ci
+
+      # The lcov the Coverage job already produced: running the suite again
+      # here would double the CI time for the same numbers.
+      - name: Download the coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+      # Fails instead of warning: the analysis is a required check of main,
+      # and a check that passes without analysing anything is worse than none.
+      - name: Require the SonarQube token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::error::SONAR_TOKEN is not configured; the quality analysis cannot run."
+            exit 1
+          fi
+
+      - name: SonarQube Cloud scan
+        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
   manifests:
     name: Validate Kubernetes manifests
     runs-on: ubuntu-latest
