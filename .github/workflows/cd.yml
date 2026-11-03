@@ -47,10 +47,27 @@ jobs:
           echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "registry=${{ steps.ecr.outputs.registry }}/car-repair-shop-execution" >> "$GITHUB_OUTPUT"
 
+      # A CD that runs again for a commit already built (a rerun after a failed
+      # deploy, or the runbook forcing a deploy without a new commit) reuses the
+      # image instead of failing on the immutable tag: same SHA, same code.
+      - name: Check whether the image already exists
+        id: existing
+        env:
+          TAG: ${{ steps.meta.outputs.sha }}
+        run: |
+          if aws ecr describe-images --repository-name car-repair-shop-execution \
+               --image-ids imageTag="$TAG" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "image $TAG is already in the registry; build and push skipped"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Tagged by SHA: with `latest` a rollback is impossible and a restarting
       # pod can come back on a different image. The ECR repository is IMMUTABLE,
       # so pushing the same SHA twice fails instead of replacing silently.
       - name: Build and push
+        if: steps.existing.outputs.exists != 'true'
         env:
           IMAGE: ${{ steps.meta.outputs.registry }}
           TAG: ${{ steps.meta.outputs.sha }}
